@@ -19,7 +19,7 @@ A compact FM radio built on an MCU with a Si4703 tuner. Features digital tuning 
     The control logic will be implemented in MicroPython for rapid development, code readability, and a focus on the user interface and receiver     functionality.
 _  2. List of Hardware Components_
       ---
-| Componente | Descripción | Justificación de la Elección |
+| Component | Description | Justification of Choice |
 | :--- | :--- | :--- |
 | **Microcontroller (MCU)** | ESP32 or Raspberry Pi Pico W | **Powerful and MicroPython-ready.** Sufficient GPIO pins, native **I²C** support, and processing power for tuning and basic **RDS decoding**. |
 | **FM Tuner Module** | Si4703 (Audio Out/Antenna Jack) | **Core Component.** Integrated **RDS/RBDS processor** and wide FM band support (76-108 MHz). Uses the simple **I²C** interface. |
