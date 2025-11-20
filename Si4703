@@ -1,0 +1,147 @@
+# -------------------------------------------------------------
+#   MicroPython driver para Si4703 en modo 3-wire (SDIO/SCLK/SEN)
+#   Módulo HW-322 — ESP32
+#   Versión didáctica con RESET manual
+# -------------------------------------------------------------
+
+from machine import Pin
+import time
+
+
+class SI4703:
+    def __init__(self, pin_sdio=21, pin_sclk=22, pin_sen=23, pin_reset=4):
+        # Guardar pines
+        self.sdio_pin = pin_sdio
+
+        # SDIO = entrada al inicio (modo lectura)
+        self.sdio = Pin(pin_sdio, Pin.IN)
+        self.sclk = Pin(pin_sclk, Pin.OUT)
+        self.sen  = Pin(pin_sen, Pin.OUT)
+        self.rst  = Pin(pin_reset, Pin.OUT)
+
+        # Valores iniciales recomendados
+        self.sclk.value(0)
+        self.sen.value(1)    # SEN inactivo
+
+    # ----------------------------------------------------------
+    #  IMPULSO DIGITAL DE ENCENDIDO (RESET)
+    #  Obligatorio para entrar en modo 3-wire
+    # ----------------------------------------------------------
+    def hardware_reset(self):
+        # Según datasheet:
+        # SEN = HIGH, SCLK = LOW
+        self.sen.value(1)
+        self.sclk.value(0)
+
+        # Pulso digital
+        self.rst.value(0)
+        time.sleep_ms(10)
+        self.rst.value(1)   # ← IMPULSO DIGITAL
+        time.sleep_ms(60)
+
+    # ----------------------------------------------------------
+    #  Manejo de SDIO como entrada/salida
+    # ----------------------------------------------------------
+    def _sdio_out(self):
+        self.sdio.init(Pin.OUT)
+
+    def _sdio_in(self):
+        self.sdio.init(Pin.IN)
+
+    # ----------------------------------------------------------
+    #  Bit-banging 3-wire
+    # ----------------------------------------------------------
+    def _pulse_clk(self):
+        self.sclk.value(0)
+        time.sleep_us(2)
+        self.sclk.value(1)
+        time.sleep_us(2)
+
+    def _send_bit(self, bit):
+        self.sdio.value(bit)
+        self._pulse_clk()
+
+    def _read_bit(self):
+        self._pulse_clk()
+        return self.sdio.value()
+
+    def _send_word(self, w):
+        self._sdio_out()
+        for i in range(15, -1, -1):
+            self._send_bit((w >> i) & 1)
+
+    def _read_word(self):
+        self._sdio_in()
+        v = 0
+        for _ in range(16):
+            v = (v << 1) | self._read_bit()
+        return v
+
+    # ----------------------------------------------------------
+    #  Escritura registros 0x02 en adelante
+    # ----------------------------------------------------------
+    def write_registers(self, values):
+        self.sen.value(0)
+        time.sleep_us(2)
+
+        for w in values:
+            self._send_word(w)
+
+        self.sen.value(1)
+        time.sleep_us(2)
+
+    # ----------------------------------------------------------
+    #  Lectura registros 0x0A en adelante
+    # ----------------------------------------------------------
+    def read_registers(self, count=6):
+        regs = []
+
+        self.sen.value(0)
+        time.sleep_us(2)
+
+        for _ in range(count):
+            regs.append(self._read_word())
+
+        self.sen.value(1)
+        time.sleep_us(2)
+        return regs
+
+    # ----------------------------------------------------------
+    #  POWERUP → activar FM sin mute
+    # ----------------------------------------------------------
+    def powerup(self):
+        POWERCFG = 0x4001  # Enable + Unmute
+        self.write_registers([POWERCFG])
+        time.sleep_ms(200)
+
+    # ----------------------------------------------------------
+    #  VOLUMEN 0–15
+    # ----------------------------------------------------------
+    def set_volume(self, vol):
+        assert 0 <= vol <= 15
+
+        regs = self.read_registers(6)
+        VOL = regs[5]
+
+        VOL = (VOL & 0xFFF0) | vol
+        self.write_registers([VOL])
+
+    # ----------------------------------------------------------
+    #  Sintonizar frecuencia FM en kHz (p. ej. 101100 = 101.1 MHz)
+    # ----------------------------------------------------------
+    def tune(self, freq_khz):
+        f_mhz = freq_khz / 1000
+        CHAN = int((f_mhz - 87.5) / 0.1)
+
+        TUNE = 0x8000 | CHAN
+        self.write_registers([0x4001, TUNE])
+
+        time.sleep_ms(60)
+
+    # ----------------------------------------------------------
+    #  Intensidad de señal RSSI
+    # ----------------------------------------------------------
+    def get_rssi(self):
+        regs = self.read_registers(6)
+        STATUSRSSI = regs[0]
+        return STATUSRSSI & 0x00FF
