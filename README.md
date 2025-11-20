@@ -1,37 +1,49 @@
-# FM-Receiver
-A compact FM radio built on an MCU with a Si4703 tuner. Features digital tuning and decodes Radio Data System (RDS) information (station name/text), displaying it on an OLED screen. Utilizes I²C for communication and MicroPython for control logic. Essential for learning I²C and protocol decoding.
-# Phase 1: Design (Project Proposal)
-  Objective
-    Plan, design, and justify your project idea before implementation.
-    
- _ 1. Problem Statement and Solution Overview_
- 
-    Problem Statement
-    Traditional FM radio receivers often rely on analog dials or simple digital displays that only show the frequency. This offers a limited         user experience and lacks the contextual information (like station name or song title) provided by the Radio Data System (RDS) standard.         Moreover, off-the-shelf receivers are often expensive or not suitable for educational prototyping.
+# ESP32 FM Radio Receiver with Si4703 and 1.3" I2C OLED
 
-    Solution Overview using MCU
-    We will design and construct a compact, functional FM radio receiver using a Microcontroller (MCU) to enable precise digital tuning and RDS      data decoding.
+Proyecto de laboratorio: receptor de radio FM con sintonía digital usando:
 
-    The MCU (ESP32) will manage I²C communication with the Si4703 tuner module to set the frequency and read RDS data.
+- ESP32 (MicroPython)
+- Módulo Si4703 (FM tuner, I2C)
+- Pantalla OLED 1.3" GME12864-77 (controlador tipo SH1106, I2C)
+- Botones para cambiar frecuencia y volumen
 
-    The MCU will process user input (buttons) for tuning and dynamically control an OLED display to show the current frequency, signal strength,     and decoded RDS information.
+## Objetivo
 
-    The control logic will be implemented in MicroPython for rapid development, code readability, and a focus on the user interface and receiver     functionality.
-_  2. List of Hardware Components_
-      ---
-| Component | Description | Justification of Choice |
-| :--- | :--- | :--- |
-| **Microcontroller (MCU)** | ESP32 or Raspberry Pi Pico W | **Powerful and MicroPython-ready.** Sufficient GPIO pins, native **I²C** support, and processing power for tuning and basic **RDS decoding**. |
-| **FM Tuner Module** | Si4703 (Audio Out/Antenna Jack) | **Core Component.** Integrated **RDS/RBDS processor** and wide FM band support (76-108 MHz). Uses the simple **I²C** interface. |
-| **Display** | 128x64 I²C OLED Display (SSD1306) | **Clear and compact visualization.** High contrast is ideal for dynamic display of frequency, signal strength, and **RDS text**. **I²C** interface saves GPIO pins. |
-| **Tuning Buttons** | 3 x Tactile Pushbuttons | **Simple user interface.** Used for: Frequency Up, Frequency Down, and Mode Toggle (e.g., Seek/Mute). |
-| **Audio Output** | 3.5mm Audio Jack | Essential for connection to headphones/speakers, and often **serves as the FM antenna** when a cable is plugged in. |
-| **Auxiliary Components** | Breadboard, Jumper Wires, Pull-up resistors | Necessary for **flexible assembly** of the prototype and ensuring stable **I²C communication**. |
+Implementar un receptor de FM con:
 
-_  3. Software Design_
-      System-Level Block Diagram
-      The software design focuses on the MCU's main control loop, which manages the three key tasks: User Input, Tuner Control, and Display             Update.
+- Sintonía de 87.5 a 108.0 MHz
+- Visualización de frecuencia, RSSI, volumen y modo estéreo en pantalla
+- Control mediante botones físicos
+- (Opcional) Lectura de información RDS
 
-      Flowchart for Software Logic
-      The program will run in an infinite loop after initialization, constantly checking the system state.
+## Hardware
+
+- **ESP32** (indicar modelo de la placa)
+- **Si4703 FM tuner** (indicar módulo exacto si lo sabéis)
+- **OLED 1.3" I2C GME12864-77**
+- 4 botones pulsadores
+- Cable de antena (~75 cm) conectado al pin ANT del Si4703
+- Cables dupont, protoboard, etc.
+
+### Conexiones principales
+
+```text
+ESP32        ->  OLED / Si4703
+-------------------------------
+3V3          ->  VCC (OLED, Si4703)
+GND          ->  GND (OLED, Si4703)
+
+GPIO21 (SDA) ->  SDA (OLED), SDIO (Si4703)
+GPIO22 (SCL) ->  SCL (OLED), SCLK (Si4703)
+
+Si4703:
+SEN          ->  GND        (modo I2C)
+ANT          ->  cable antena
+
+Botones (ejemplo):
+GPIO32       ->  BTN_FREQ_UP   (pull-up interno, pulsador a GND)
+GPIO33       ->  BTN_FREQ_DOWN
+GPIO25       ->  BTN_VOL_UP
+GPIO26       ->  BTN_VOL_DOWN
+
       
