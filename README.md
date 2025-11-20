@@ -1,49 +1,160 @@
-# ESP32 FM Radio Receiver with Si4703 and 1.3" I2C OLED
+# ESP32 FM Radio Receiver Using Si4703 and 1.3" I²C OLED (MicroPython)
 
-Proyecto de laboratorio: receptor de radio FM con sintonía digital usando:
+This project implements an FM radio receiver using an ESP32, the Si4703 FM tuner module, and a 1.3" SH1106-based OLED display.
+The system is developed in MicroPython and follows a structured hardware–software integration approach.
 
-- ESP32 (MicroPython)
-- Módulo Si4703 (FM tuner, I2C)
-- Pantalla OLED 1.3" GME12864-77 (controlador tipo SH1106, I2C)
-- Botones para cambiar frecuencia y volumen
+---
 
-## Objetivo
+## Overview
 
-Implementar un receptor de FM con:
+The FM receiver provides:
 
-- Sintonía de 87.5 a 108.0 MHz
-- Visualización de frecuencia, RSSI, volumen y modo estéreo en pantalla
-- Control mediante botones físicos
-- (Opcional) Lectura de información RDS
+* Digital tuning between 87.5 and 108.0 MHz
+* Display of frequency, RSSI, volume level, and stereo indication
+* Push-button control for tuning and volume
+* Shared I²C bus for both the OLED and the Si4703
+* Modular MicroPython code (drivers + main application)
 
-## Hardware
+---
 
-- **ESP32** (indicar modelo de la placa)
-- **Si4703 FM tuner** (indicar módulo exacto si lo sabéis)
-- **OLED 1.3" I2C GME12864-77**
-- 4 botones pulsadores
-- Cable de antena (~75 cm) conectado al pin ANT del Si4703
-- Cables dupont, protoboard, etc.
+## Hardware Components
 
-### Conexiones principales
+* ESP32 DevKit (MicroPython compatible)
+* Si4703 FM tuner module (I²C version)
+* 1.3" I²C OLED display GME12864-77 (SH1106 controller)
+* 4 push buttons
+* Antenna wire (~75 cm) connected to the Si4703 ANT pin
+* Breadboard and jumper wires
 
-```text
-ESP32        ->  OLED / Si4703
--------------------------------
-3V3          ->  VCC (OLED, Si4703)
-GND          ->  GND (OLED, Si4703)
+---
 
-GPIO21 (SDA) ->  SDA (OLED), SDIO (Si4703)
-GPIO22 (SCL) ->  SCL (OLED), SCLK (Si4703)
+## Wiring Connections
 
-Si4703:
-SEN          ->  GND        (modo I2C)
-ANT          ->  cable antena
+### I²C Bus (OLED + Si4703)
 
-Botones (ejemplo):
-GPIO32       ->  BTN_FREQ_UP   (pull-up interno, pulsador a GND)
-GPIO33       ->  BTN_FREQ_DOWN
-GPIO25       ->  BTN_VOL_UP
-GPIO26       ->  BTN_VOL_DOWN
+```
+ESP32        →  OLED / Si4703
+--------------------------------------
+3V3          →  VCC (both devices)
+GND          →  GND (both devices)
 
-      
+GPIO21 (SDA) →  SDA (OLED), SDIO (Si4703)
+GPIO22 (SCL) →  SCL (OLED), SCLK (Si4703)
+```
+
+### Si4703 Control Pins
+
+```
+SEN   →  GND     (forces I²C mode)
+RST   →  not connected (module includes internal pull-up)
+ANT   →  antenna wire (~75 cm)
+```
+
+### Button Inputs
+
+```
+GPIO32 → Frequency Up     (button → GND, internal pull-up enabled)
+GPIO33 → Frequency Down
+GPIO25 → Volume Up
+GPIO26 → Volume Down
+```
+
+---
+
+## Repository Structure
+
+```
+esp32-fm-radio-si4703/
+├─ README.md
+├─ .gitignore
+├─ LICENSE
+│
+├─ src/
+│  ├─ main.py                 # Final integrated FM radio application
+│  ├─ radio_si4703.py         # Si4703 radio driver class
+│  ├─ oled_sh1106.py          # OLED display driver
+│  ├─ test_i2c_scan.py        # I²C wiring/device detection
+│  ├─ test_oled.py            # OLED test program
+│  └─ test_radio_dummy.py     # Radio functionality test without display
+│
+├─ docs/
+│  ├─ report.md               # Project documentation
+│  ├─ wiring-diagram.png      # Wiring diagram
+│  ├─ block-diagram.png       # System architecture diagram
+│  └─ flowchart-tuning.png    # Tuning logic flowchart
+│
+└─ images/
+   ├─ breadboard.jpg
+   ├─ si4703.jpg
+   └─ oled-demo.jpg
+```
+
+---
+
+## Testing
+
+Before running the full radio application, verify the I²C bus using:
+
+`src/test_i2c_scan.py`
+
+Expected output:
+
+```
+I2C scan: [60, 16]
+OLED detected at 0x3C
+Si4703 detected at 0x10
+```
+
+If the Si4703 does not appear:
+
+* Ensure SEN is connected to GND
+* Ensure all devices share the same GND
+* Verify that the module is powered at 3.3 V (5 V can permanently damage it)
+
+---
+
+## Running the FM Radio Application
+
+1. Install MicroPython on the ESP32.
+2. Upload all files from the `src/` directory to the board.
+3. Confirm that both I²C devices are detected in the scan.
+4. Run `main.py`.
+
+The OLED display will show information such as:
+
+```
+FM RADIO
+Freq: 101.0 MHz
+RSSI:  35
+Vol:   3
+STEREO
+```
+
+Use the buttons to adjust frequency and volume.
+
+---
+
+## Documentation
+
+The `docs/` directory contains:
+
+* A full project report (`report.md`)
+* Wiring diagram
+* Block diagram of the system
+* Flowchart of the tuning logic
+
+---
+
+## Future Improvements
+
+Possible extensions include:
+
+* RDS station name and text decoding
+* Automatic seek functionality
+* Improved graphical UI
+* PCB implementation
+* 3D-printed enclosure
+* Battery power integration
+
+
+
