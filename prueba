@@ -1,0 +1,228 @@
+# -------------------------------------------------------------
+#   MicroPython driver para Si4703 en modo 3-wire (SDIO/SCLK/SEN)
+#   Módulo HW-322 — ESP32
+#   Versión didáctica con RESET correcto y test de RSSI
+# -------------------------------------------------------------
+
+from machine import Pin
+import time
+
+
+class SI4703:
+    def __init__(self, pin_sdio=21, pin_sclk=22, pin_sen=23, pin_reset=4):
+        # Guardar números de pin
+        self.sdio_pin_num = pin_sdio
+
+        # Inicializar pines
+        # SDIO como entrada al principio
+        self.sdio = Pin(pin_sdio, Pin.IN)
+        self.sclk = Pin(pin_sclk, Pin.OUT)
+        self.sen  = Pin(pin_sen, Pin.OUT)
+        self.rst  = Pin(pin_reset, Pin.OUT)
+
+        # Valores iniciales recomendados
+        self.sclk.value(0)
+        self.sen.value(1)    # SEN inactivo
+        self.rst.value(0)
+
+        # Entrar en modo 3-wire correctamente
+        self.hardware_reset()
+
+    # ----------------------------------------------------------
+    #  Manejo de SDIO como entrada/salida
+    # ----------------------------------------------------------
+    def _sdio_out(self):
+        self.sdio = Pin(self.sdio_pin_num, Pin.OUT)
+
+    def _sdio_in(self):
+        self.sdio = Pin(self.sdio_pin_num, Pin.IN)
+
+    # ----------------------------------------------------------
+    #  IMPULSO DIGITAL DE ENCENDIDO (RESET) → modo 3-wire
+    # ----------------------------------------------------------
+    def hardware_reset(self):
+        print("[SI4703] hardware_reset()")
+
+        # Para modo 3-wire según datasheet:
+        # SEN = HIGH, SCLK = LOW, SDIO = LOW durante el flanco de RESET
+        self.sen.value(1)
+        self.sclk.value(0)
+
+        # SDIO a 0 como salida (MUY IMPORTANTE)
+        self._sdio_out()
+        self.sdio.value(0)
+
+        # Pulso de reset
+        self.rst.value(0)
+        time.sleep_ms(10)
+        self.rst.value(1)
+        time.sleep_ms(60)
+
+        # SDIO puede volver a entrada (listo para lecturas)
+        self._sdio_in()
+        print("[SI4703] Reset completado, debería estar en modo 3-wire")
+
+    # ----------------------------------------------------------
+    #  Bit-banging 3-wire
+    # ----------------------------------------------------------
+    def _pulse_clk(self):
+        self.sclk.value(0)
+        time.sleep_us(2)
+        self.sclk.value(1)
+        time.sleep_us(2)
+
+    def _send_bit(self, bit):
+        self.sdio.value(bit)
+        self._pulse_clk()
+
+    def _read_bit(self):
+        self._pulse_clk()
+        return self.sdio.value()
+
+    def _send_word(self, w):
+        self._sdio_out()
+        for i in range(15, -1, -1):
+            self._send_bit((w >> i) & 1)
+
+    def _read_word(self):
+        self._sdio_in()
+        v = 0
+        for _ in range(16):
+            v = (v << 1) | self._read_bit()
+        return v
+
+    # ----------------------------------------------------------
+    #  Escritura registros 0x02 en adelante (modo simple)
+    #  En este driver didáctico, values es una lista de palabras
+    #  que empiezan en 0x02, 0x03, ...
+    # ----------------------------------------------------------
+    def write_registers(self, values):
+        self.sen.value(0)
+        time.sleep_us(2)
+
+        for w in values:
+            self._send_word(w)
+
+        self.sen.value(1)
+        time.sleep_us(2)
+
+    # ----------------------------------------------------------
+    #  Lectura registros 0x0A en adelante
+    #  count palabras → 0x0A,0x0B,... (wrapping después)
+    # ----------------------------------------------------------
+    def read_registers(self, count=6):
+        regs = []
+
+        self.sen.value(0)
+        time.sleep_us(2)
+
+        for _ in range(count):
+            regs.append(self._read_word())
+
+        self.sen.value(1)
+        time.sleep_us(2)
+        return regs
+
+    # ----------------------------------------------------------
+    #  POWERUP → activar FM sin mute
+    # ----------------------------------------------------------
+    def powerup(self):
+        print("[SI4703] powerup()")
+        # POWERCFG (0x02): ENABLE + DMUTE
+        POWERCFG = 0x4001  # bit15=DMUTE, bit0=ENABLE
+        self.write_registers([POWERCFG])
+        time.sleep_ms(200)
+        print("[SI4703] Chip encendido (ENABLE+DMUTE)")
+
+    # ----------------------------------------------------------
+    #  VOLUMEN 0–15 (muy básico, didáctico)
+    # ----------------------------------------------------------
+    def set_volume(self, vol):
+        print("[SI4703] set_volume({})".format(vol))
+        assert 0 <= vol <= 15
+
+        # Leemos 6 registros empezando en 0x0A, el 6º es 0x0F,
+        # pero aquí usamos un truco didáctico para escribir sólo
+        # el último valor (no es un driver completo, solo demo).
+        regs = self.read_registers(6)
+        VOL = regs[5]              # contenido de registro alto
+        VOL = (VOL & 0xFFF0) | vol
+        self.write_registers([VOL])
+
+    # ----------------------------------------------------------
+    #  Sintonizar frecuencia FM en kHz (p.ej. 101100 = 101.1 MHz)
+    #  Banda europea: 87.5–108 MHz, paso 100 kHz
+    # ----------------------------------------------------------
+    def tune(self, freq_khz):
+        f_mhz = freq_khz / 1000.0
+        print("[SI4703] tune({} kHz → {:.1f} MHz)".format(freq_khz, f_mhz))
+
+        CHAN = int((f_mhz - 87.5) / 0.1)
+        if CHAN < 0:
+            CHAN = 0
+        if CHAN > 0x03FF:
+            CHAN = 0x03FF
+
+        # TUNE bit (bit15) + canal
+        TUNE = 0x8000 | CHAN
+
+        # POWERCFG + CHANNEL (tune)
+        self.write_registers([0x4001, TUNE])
+
+        time.sleep_ms(60)
+        print("[SI4703] Sintonizado (aprox)")
+
+    # ----------------------------------------------------------
+    #  Intensidad de señal RSSI (0–255)
+    #  Lee STATUSRSSI (0x0A) como primer registro
+    # ----------------------------------------------------------
+    def get_rssi(self):
+        regs = self.read_registers(6)
+        STATUSRSSI = regs[0]
+        rssi = STATUSRSSI & 0x00FF
+        return rssi
+
+
+# -------------------------------------------------------------
+#                 PROGRAMA DE PRUEBA DEL DRIVER
+# -------------------------------------------------------------
+# Conexiones esperadas:
+#   SDIO → GPIO 21
+#   SCLK → GPIO 22
+#   SEN  → GPIO 23
+#   RST  → GPIO 4
+#   VCC  → 3.3 V
+#   GND  → GND
+# Auriculares / ampli conectados a la salida audio del Si4703
+# -------------------------------------------------------------
+
+def main():
+    print("=== TEST COMUNICACION SI4703 (3-WIRE) ===")
+    print("Asegurate de que:")
+    print("  SDIO → 21, SCLK → 22, SEN → 23, RST → 4, VCC=3.3V")
+    print("-----------------------------------------")
+
+    # Crear objeto radio
+    radio = SI4703(pin_sdio=21, pin_sclk=22, pin_sen=23, pin_reset=4)
+
+    # Encender chip
+    radio.powerup()
+
+    # Sintonizar una frecuencia de prueba (ej: 101.1 MHz)
+    radio.tune(101100)
+
+    # Leer y mostrar RSSI varias veces
+    print("Leyendo RSSI cada segundo (sin antena será bajo, pero NO 255 si comunica bien)")
+    print("Pulsa Ctrl+C para parar.")
+    while True:
+        rssi = radio.get_rssi()
+        print("RSSI =", rssi)
+        time.sleep(1)
+
+
+# Ejecutar solo si es el script principal
+if __name__ == "__main__":
+    try:
+        main()
+    except KeyboardInterrupt:
+        print("\n[FIN] Test interrumpido por el usuario.")
