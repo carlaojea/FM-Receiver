@@ -1,6 +1,7 @@
 # -------------------------------------------------------------
-#   RADIO FM SI4703 - VERSIÓN FINAL
-#   Hardware: ESP32 + OLED 1.3" (SH1106) + 5 Botones
+#   RADIO FM SI4703 - VERSIÓN FINAL (SH1106 1.3")
+#   Hardware: ESP32 + OLED 1.3" + 5 Botones
+#   Característica: Arranca en emisora fija definida
 # -------------------------------------------------------------
 
 from machine import Pin, I2C
@@ -42,49 +43,51 @@ class SI4703_Driver:
         time.sleep_ms(110)
 
     def set_vol(self, v):
-        # Limitar entre 0 y 15
         v = max(0, min(15, v))
         self._read()
-        # Borrar bits viejos y poner los nuevos
         self.shadow[0x05] = (self.shadow[0x05] & 0xFFF0) | v
         self._write()
 
+    # --- FUNCIÓN NUEVA: IR A UNA FRECUENCIA EXACTA ---
+    def tune(self, freq):
+        # Calcular el canal (Fórmula: (Freq - 87.5) / 0.1)
+        channel = int((freq - 87.5) / 0.1)
+        
+        self._read()
+        # Limpiar bits de canal viejos, poner los nuevos y activar bit TUNE (15)
+        self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | channel | (1 << 15)
+        self._write()
+        
+        self._wait_stc() # Esperar a que el chip termine
+        
+        # Apagar el bit TUNE para dejarlo listo
+        self.shadow[0x03] &= ~(1 << 15)
+        self._write()
+
     def tune_step(self, up=True):
-        # Sintonizar 0.1 MHz arriba o abajo
         self._read()
         chan = self.shadow[0x03] & 0x03FF
         if up: chan += 1
         else: chan -= 1
         
-        # Activar bit TUNE (bit 15)
         self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | chan | (1 << 15)
         self._write()
-        
-        self._wait_stc() # Esperar a que termine
-        
-        # Apagar bit TUNE
+        self._wait_stc()
         self.shadow[0x03] &= ~(1 << 15)
         self._write()
 
     def seek(self, up=True):
-        # Búsqueda automática
         self._read()
-        # Configurar dirección (bit 9)
         if up: self.shadow[0x02] |= (1 << 9)
         else: self.shadow[0x02] &= ~(1 << 9)
         
-        # Activar bit SEEK (bit 8)
-        self.shadow[0x02] |= (1 << 8)
+        self.shadow[0x02] |= (1 << 8) # Activar bit SEEK
         self._write()
-        
-        self._wait_stc() # Esperar a que termine
-        
-        # Apagar bit SEEK
-        self.shadow[0x02] &= ~(1 << 8)
+        self._wait_stc()
+        self.shadow[0x02] &= ~(1 << 8) # Apagar bit SEEK
         self._write()
 
     def get_info(self):
-        # Devolver: (Frecuencia, Volumen, Señal)
         self._read()
         chan = self.shadow[0x0B] & 0x03FF
         freq = 87.5 + (chan * 0.1)
@@ -92,11 +95,9 @@ class SI4703_Driver:
         rssi = self.shadow[0x0A] & 0xFF
         return freq, vol, rssi
 
-    # --- Funciones internas ---
     def _wait_stc(self):
         while True:
             self._read()
-            # Verificar bit STC (Seek/Tune Complete) en registro 0x0A
             if self.shadow[0x0A] & (1 << 14): break
             time.sleep_ms(20)
 
@@ -108,8 +109,7 @@ class SI4703_Driver:
                 self.shadow[idx] = (d[i] << 8) | d[i+1]
                 idx += 1
                 if idx > 0x0F: idx = 0x00
-        except OSError:
-            pass # Ignorar errores puntuales de I2C
+        except OSError: pass 
 
     def _write(self):
         buf = bytearray(12)
@@ -128,7 +128,6 @@ class MenuSystem:
         self.radio = radio
         self.oled = display
         
-        # Configurar botones con PULL_UP (Se activan con GND/0)
         self.btn_up     = Pin(pins[0], Pin.IN, Pin.PULL_UP)
         self.btn_down   = Pin(pins[1], Pin.IN, Pin.PULL_UP)
         self.btn_left   = Pin(pins[2], Pin.IN, Pin.PULL_UP)
@@ -140,123 +139,91 @@ class MenuSystem:
 
     def check_buttons(self):
         act = False
-        
-        # --- NAVEGACIÓN (Arriba/Abajo) ---
         if self.btn_up.value() == 0:
-            self.cursor = 0
-            act = True
-            time.sleep(0.2) # Anti-rebote
+            self.cursor = 0; act = True; time.sleep(0.2)
         elif self.btn_down.value() == 0:
-            self.cursor = 1
-            act = True
-            time.sleep(0.2)
+            self.cursor = 1; act = True; time.sleep(0.2)
 
-        # --- ACCIÓN (Izq/Der/Centro) ---
-        if self.cursor == 0: # ESTAMOS EN FRECUENCIA
+        if self.cursor == 0: # FRECUENCIA
             if self.btn_left.value() == 0:
-                self.radio.tune_step(up=False)
-                act = True
+                self.radio.tune_step(up=False); act = True
             elif self.btn_right.value() == 0:
-                self.radio.tune_step(up=True)
-                act = True
+                self.radio.tune_step(up=True); act = True
             elif self.btn_center.value() == 0:
                 self.oled.fill(0)
                 self.oled.text("Buscando...", 25, 30)
                 self.oled.show()
-                self.radio.seek(up=True)
-                act = True
+                self.radio.seek(up=True); act = True
 
-        elif self.cursor == 1: # ESTAMOS EN VOLUMEN
+        elif self.cursor == 1: # VOLUMEN
             current_vol = self.radio.get_info()[1]
             if self.btn_left.value() == 0:
-                self.radio.set_vol(current_vol - 1)
-                act = True
-                time.sleep(0.1) # Pausa corta para volumen fluido
+                self.radio.set_vol(current_vol - 1); act = True; time.sleep(0.1)
             elif self.btn_right.value() == 0:
-                self.radio.set_vol(current_vol + 1)
-                act = True
-                time.sleep(0.1)
+                self.radio.set_vol(current_vol + 1); act = True; time.sleep(0.1)
             elif self.btn_center.value() == 0:
-                self.radio.set_vol(0) # Mute rápido
-                act = True
-                time.sleep(0.3)
+                self.radio.set_vol(0); act = True; time.sleep(0.3)
         
-        if act:
-            self.update_ui()
+        if act: self.update_ui()
 
     def update_ui(self):
         freq, vol, rssi = self.radio.get_info()
-        
         self.oled.fill(0)
-        # Título
         self.oled.text("RADIO FM", 35, 0)
         self.oled.hline(0, 10, 128, 1)
         
-        # Cursor >
         y_pos = 20 if self.cursor == 0 else 40
         self.oled.text(">", 5, y_pos)
-        
-        # Datos
         self.oled.text(f"Freq: {freq:.1f}", 20, 20)
         self.oled.text(f"Vol : {vol}", 20, 40)
         
-        # Dibujar barra de señal (RSSI)
         width_rssi = int((rssi / 100) * 30)
         self.oled.rect(90, 20, 32, 8, 1)
         self.oled.fill_rect(91, 21, width_rssi, 6, 1)
         
-        # Dibujar barra de volumen
         width_vol = int((vol / 15) * 30)
         self.oled.rect(90, 40, 32, 8, 1)
         self.oled.fill_rect(91, 41, width_vol, 6, 1)
         
-        # Ayuda inferior
         self.oled.hline(0, 52, 128, 1)
-        if self.cursor == 0:
-            self.oled.text("[Tune] [Seek]", 10, 55)
-        else:
-            self.oled.text("[-Vol+] [Mute]", 10, 55)
-            
+        if self.cursor == 0: self.oled.text("[Tune] [Seek]", 10, 55)
+        else: self.oled.text("[-Vol+] [Mute]", 10, 55)   
         self.oled.show()
 
 # =============================================================
 #  3. BLOQUE PRINCIPAL (Setup)
 # =============================================================
 if __name__ == "__main__":
-    # PINES I2C (Radio y OLED comparten pines)
-    PIN_SDA = 21
-    PIN_SCL = 22
-    PIN_RST_RADIO = 4
-    
-    # PINES BOTONES [Arriba, Abajo, Izq, Der, Centro]
-    PINS_BOTONES = [13, 12, 14, 27, 26]
+    PIN_SDA = 21; PIN_SCL = 22; PIN_RST_RADIO = 4
+    PINS_BOTONES = [13, 12, 14, 27, 26] # UP, DOWN, LEFT, RIGHT, CENTER
 
-    # Iniciar I2C
     i2c = I2C(0, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
 
-    # Iniciar Pantalla (SH1106)
     try:
-        print("Iniciando pantalla...")
-        oled = sh1106.SH1106_I2C(128, 64, i2c)
+        print("Iniciando SH1106...")
+        oled = sh1106.SH1106_I2C(128, 64, i2c) # Driver SH1106
         oled.fill(0)
         oled.text("Iniciando...", 20, 30)
         oled.show()
     except Exception as e:
         print(f"Error Pantalla: {e}")
-        print("¿Has subido el archivo sh1106.py?")
 
-    # Iniciar Radio
     print("Iniciando Radio...")
     radio = SI4703_Driver(i2c, PIN_RST_RADIO, PIN_SDA)
     radio.init()
-    radio.set_vol(5) # Volumen inicial
     
-    # Iniciar Sistema
+    # --- ZONA DE CONFIGURACIÓN INICIAL ---
+    radio.set_vol(5)         # Volumen inicial (0-15)
+    
+    # ¡AQUÍ ESTÁ LA LÍNEA MÁGICA! 
+    # Cambia el 101.5 por la emisora que quieras
+    radio.tune(101.5)        
+    
+    # -------------------------------------
+    
     menu = MenuSystem(radio, oled, PINS_BOTONES)
-    
     print("Sistema listo.")
     
-    # Bucle infinito
     while True:
         menu.check_buttons()
-        time.sleep(0.05) # Pequeña pausa para descansar CPU
+        time.sleep(0.05)
