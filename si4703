@@ -1,64 +1,14 @@
 # -------------------------------------------------------------
-#   RADIO FM SI4703 - VERSIÓN FINAL INTEGRADA
-#   Hardware: ESP32 + OLED GME12864-77 + 5 Botones
-#   Drivers: Todo incluido en este archivo (No hacen falta externos)
+#   RADIO FM SI4703 + PANTALLA SH1106 + 5 BOTONES
+#   Requiere: Archivo 'sh1106.py' en el ESP32
 # -------------------------------------------------------------
 
 from machine import Pin, I2C
 import time
-import framebuf  # Necesario para tu pantalla
+import sh1106  # Importamos tu librería
 
 # =============================================================
-#  1. DRIVER PANTALLA OLED (TU CÓDIGO QUE FUNCIONA)
-# =============================================================
-class OLED_SH1106(framebuf.FrameBuffer):
-    def __init__(self, width, height, i2c, addr=0x3C):
-        self.width = width
-        self.height = height
-        self.i2c = i2c
-        self.addr = addr
-        # Buffer: 1 bit por pixel -> width * height / 8 bytes
-        self.buffer = bytearray(self.width * self.height // 8)
-        super().__init__(self.buffer, self.width, self.height, framebuf.MONO_VLSB)
-        self._init_display()
-
-    def _write_cmd(self, cmd):
-        self.i2c.writeto(self.addr, b'\x80' + bytes([cmd]))
-
-    def _write_data(self, buf):
-        self.i2c.writeto(self.addr, b'\x40' + buf)
-
-    def _init_display(self):
-        for cmd in (
-            0xAE,       # display off
-            0xD5, 0x80, # clock
-            0xA8, 0x3F, # multiplex 1/64
-            0xD3, 0x00, # display offset
-            0x40,       # start line = 0
-            0xAD, 0x8B, # charge pump
-            0xA1,       # segment remap
-            0xC8,       # COM scan dir remap
-            0xDA, 0x12, # COM pins
-            0x81, 0x80, # contraste
-            0xD9, 0x1F, # pre-charge
-            0xDB, 0x40, # Vcomh
-            0xA4,       # display follow RAM
-            0xA6,       # normal (no invertido)
-            0xAF        # display on
-        ):
-            self._write_cmd(cmd)
-
-    def show(self):
-        for page in range(0, self.height // 8):
-            self._write_cmd(0xB0 | page)
-            self._write_cmd(0x02)      # low col
-            self._write_cmd(0x10)      # high col
-            start = self.width * page
-            end = start + self.width
-            self._write_data(self.buffer[start:end])
-
-# =============================================================
-#  2. DRIVER RADIO SI4703 (Motor de sintonización)
+#  1. DRIVER RADIO SI4703 (Motor de sintonización)
 # =============================================================
 class SI4703_Driver:
     I2C_ADDR = 0x10
@@ -138,7 +88,7 @@ class SI4703_Driver:
         self.i2c.writeto(self.I2C_ADDR, b)
 
 # =============================================================
-#  3. SISTEMA DE MENÚ (Interfaz Gráfica)
+#  2. SISTEMA DE MENÚ (Interfaz Gráfica)
 # =============================================================
 class MenuSystem:
     def __init__(self, radio, display, pins):
@@ -159,93 +109,4 @@ class MenuSystem:
         act = False
         # Navegación Vertical
         if self.btn_up.value() == 0:
-            self.cursor = 0; act = True; time.sleep(0.2)
-        elif self.btn_down.value() == 0:
-            self.cursor = 1; act = True; time.sleep(0.2)
-
-        # Acciones Horizontales
-        if self.cursor == 0: # FRECUENCIA
-            if self.btn_left.value() == 0:
-                self.radio.tune_step(False); act = True
-            elif self.btn_right.value() == 0:
-                self.radio.tune_step(True); act = True
-            elif self.btn_center.value() == 0:
-                self.oled.fill(0); self.oled.text("Buscando...", 25, 30); self.oled.show()
-                self.radio.seek(True); act = True
-
-        elif self.cursor == 1: # VOLUMEN
-            vol = self.radio.get_info()[1]
-            if self.btn_left.value() == 0:
-                self.radio.set_vol(vol - 1); act = True; time.sleep(0.1)
-            elif self.btn_right.value() == 0:
-                self.radio.set_vol(vol + 1); act = True; time.sleep(0.1)
-            elif self.btn_center.value() == 0:
-                self.radio.set_vol(0); act = True; time.sleep(0.3)
-        
-        if act: self.update_ui()
-
-    def update_ui(self):
-        freq, vol, rssi = self.radio.get_info()
-        self.oled.fill(0)
-        
-        # Dibujar Interfaz
-        self.oled.text("RADIO FM", 35, 0)
-        self.oled.hline(0, 10, 128, 1) # Línea horizontal
-        
-        y = 20 if self.cursor == 0 else 40
-        self.oled.text(">", 5, y)
-        self.oled.text(f"Freq: {freq:.1f}", 20, 20)
-        self.oled.text(f"Vol : {vol}", 20, 40)
-        
-        # Barras visuales (usamos fill_rect que hereda de framebuf)
-        self.oled.rect(90, 20, 30, 8, 1)
-        self.oled.fill_rect(92, 22, int((rssi/100)*26), 4, 1)
-        
-        self.oled.rect(90, 40, 30, 8, 1)
-        self.oled.fill_rect(92, 42, int((vol/15)*26), 4, 1)
-        
-        self.oled.hline(0, 52, 128, 1)
-        if self.cursor==0: self.oled.text("[Tune] [Seek]", 10, 55)
-        else: self.oled.text("[-Vol+] [Mute]", 10, 55)
-        
-        self.oled.show()
-
-# =============================================================
-#  4. CONFIGURACIÓN Y BUCLE PRINCIPAL
-# =============================================================
-if __name__ == "__main__":
-    # PINES
-    PIN_SDA = 21; PIN_SCL = 22; PIN_RST = 4
-    # BOTONES: Arriba, Abajo, Izq, Der, Centro
-    PINS_BOTONES = [13, 12, 14, 27, 26] 
-
-    # 1. Iniciar I2C (Usamos el canal 0 o 1, da igual en ESP32 si defines pines)
-    i2c = I2C(0, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
-
-    # 2. Iniciar PANTALLA (Con tu clase OLED_SH1106)
-    try:
-        print("Iniciando Pantalla...")
-        oled = OLED_SH1106(128, 64, i2c)
-        oled.fill(0)
-        oled.text("Iniciando...", 20, 30)
-        oled.show()
-    except Exception as e:
-        print(f"Error Pantalla: {e}")
-
-    # 3. Iniciar RADIO
-    print("Iniciando Radio...")
-    radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
-    radio.init()
-    
-    # --- CONFIGURACIÓN INICIAL ---
-    radio.set_vol(5)
-    radio.tune(101.5)  # <--- TU EMISORA INICIAL AQUÍ
-    # -----------------------------
-
-    # 4. Arrancar MENÚ
-    menu = MenuSystem(radio, oled, PINS_BOTONES)
-    print("Sistema Listo.")
-    
-    while True:
-        menu.check_buttons()
-        time.sleep(0.05)
+            self.cursor = 0; act = True; time.sleep(0.2
