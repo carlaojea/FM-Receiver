@@ -1,0 +1,163 @@
+# -------------------------------------------------------------
+#   CÓDIGO 2: SISTEMA COMPLETO (RADIO + OLED + 5 BOTONES)
+#   Lógica: Menú vertical (cursor) y ajustes horizontales.
+# -------------------------------------------------------------
+
+from machine import Pin, I2C
+import time
+import ssd1306 
+
+# --- A. DRIVER RADIO SI4703 ---
+class SI4703_Driver:
+    I2C_ADDR = 0x10
+    def __init__(self, i2c, rst, sdio):
+        self.i2c = i2c
+        self.rst = Pin(rst, Pin.OUT)
+        self.sdio = Pin(sdio, Pin.OUT)
+        self.shadow = [0]*16
+
+    def init(self):
+        self.sdio.value(0); time.sleep_ms(10) # Reset sequence
+        self.rst.value(0); time.sleep_ms(10)
+        self.rst.value(1); time.sleep_ms(10)
+        self._read(); self.shadow[0x07] = 0x8100; self._write() # Oscilador
+        time.sleep_ms(500) 
+        self._read(); self.shadow[0x02] = 0x4001; self.shadow[0x05] |= 1; self._write() # Power
+        time.sleep_ms(100)
+
+    def set_vol(self, v):
+        v = max(0, min(15, v))
+        self._read(); self.shadow[0x05] = (self.shadow[0x05] & 0xFFF0) | v
+        self._write()
+        return v
+
+    def tune_step(self, up):
+        self._read()
+        chan = self.shadow[0x03] & 0x03FF
+        chan = (chan + 1) if up else (chan - 1)
+        self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | chan | (1<<15)
+        self._write(); self._wait(); self.shadow[0x03] &= ~(1<<15); self._write()
+
+    def seek(self, up):
+        self._read()
+        if up: self.shadow[0x02] |= (1<<9)
+        else: self.shadow[0x02] &= ~(1<<9)
+        self.shadow[0x02] |= (1<<8); self._write(); self._wait()
+        self.shadow[0x02] &= ~(1<<8); self._write()
+
+    def get_data(self):
+        self._read()
+        chan = self.shadow[0x0B] & 0x03FF
+        return 87.5 + (chan * 0.1), self.shadow[0x05] & 0x0F, self.shadow[0x0A] & 0xFF
+
+    def _wait(self):
+        while True:
+            self._read()
+            if self.shadow[0x0A] & (1<<14): break
+            time.sleep_ms(20)
+
+    def _read(self):
+        try:
+            d = self.i2c.readfrom(self.I2C_ADDR, 32)
+            x=0x0A
+            for i in range(0,32,2):
+                self.shadow[x]=(d[i]<<8)|d[i+1]; x=(x+1 if x<0x0F else 0)
+        except: pass
+    def _write(self):
+        b=bytearray(12); x=0
+        for r in range(0x02,0x08):
+            b[x]=(self.shadow[r]>>8)&0xFF; b[x+1]=self.shadow[r]&0xFF; x+=2
+        self.i2c.writeto(self.I2C_ADDR, b)
+
+# --- B. LÓGICA DE MENÚ Y BOTONES ---
+class MenuSystem:
+    def __init__(self, radio, oled, pins):
+        self.radio = radio
+        self.oled = oled
+        # Configurar botones con Pull-Up (Activos en 0)
+        self.b_up = Pin(pins[0], Pin.IN, Pin.PULL_UP)
+        self.b_down = Pin(pins[1], Pin.IN, Pin.PULL_UP)
+        self.b_left = Pin(pins[2], Pin.IN, Pin.PULL_UP)
+        self.b_right = Pin(pins[3], Pin.IN, Pin.PULL_UP)
+        self.b_center = Pin(pins[4], Pin.IN, Pin.PULL_UP)
+        
+        self.cursor = 0 # 0=Frecuencia, 1=Volumen
+        self.update_screen()
+
+    def loop(self):
+        act = False
+        # 1. MOVERSE POR EL MENÚ (ARRIBA/ABAJO)
+        if self.b_up.value() == 0:
+            self.cursor = 0; act = True; time.sleep(0.2)
+        elif self.b_down.value() == 0:
+            self.cursor = 1; act = True; time.sleep(0.2)
+            
+        # 2. CAMBIAR VALORES (IZQ/DER/CENTRO)
+        if self.cursor == 0: # Modo FRECUENCIA
+            if self.b_left.value() == 0:
+                self.radio.tune_step(False); act = True
+            elif self.b_right.value() == 0:
+                self.radio.tune_step(True); act = True
+            elif self.b_center.value() == 0: # Auto Seek
+                self.oled.fill(0); self.oled.text("Buscando...", 20, 30); self.oled.show()
+                self.radio.seek(True); act = True
+
+        elif self.cursor == 1: # Modo VOLUMEN
+            vol = self.radio.get_data()[1]
+            if self.b_left.value() == 0:
+                self.radio.set_vol(vol - 1); act = True; time.sleep(0.1)
+            elif self.b_right.value() == 0:
+                self.radio.set_vol(vol + 1); act = True; time.sleep(0.1)
+            elif self.b_center.value() == 0: # Mute
+                self.radio.set_vol(0); act = True; time.sleep(0.3)
+
+        if act: self.update_screen()
+
+    def update_screen(self):
+        f, v, r = self.radio.get_data()
+        self.oled.fill(0)
+        self.oled.text("RADIO FM", 35, 0)
+        self.oled.hline(0, 10, 128, 1)
+        
+        # Dibujar cursor >
+        y_cursor = 20 if self.cursor == 0 else 40
+        self.oled.text(">", 0, y_cursor)
+        
+        self.oled.text(f"Freq: {f:.1f}", 15, 20)
+        self.oled.text(f"Vol : {v}", 15, 40)
+        
+        # Barra de señal pequeña
+        rssi_w = int((r/100)*20)
+        self.oled.rect(100, 20, 22, 8, 1)
+        self.oled.fill_rect(102, 22, rssi_w, 4, 1)
+        
+        self.oled.show()
+
+# --- C. EJECUCIÓN PRINCIPAL ---
+if __name__ == "__main__":
+    # PINES (Ajusta si es necesario)
+    P_SDA = 21; P_SCL = 22; P_RST = 4
+    # PINES BOTONES: [UP, DOWN, LEFT, RIGHT, CENTER]
+    P_BTNS = [13, 12, 14, 27, 26] 
+
+    i2c = I2C(0, scl=Pin(P_SCL), sda=Pin(P_SDA), freq=100000)
+    
+    # Inicializar pantalla
+    try:
+        oled = ssd1306.SSD1306_I2C(128, 64, i2c)
+    except:
+        print("Falta ssd1306.py o pantalla desconectada")
+        raise SystemExit
+
+    # Inicializar Radio
+    radio = SI4703_Driver(i2c, P_RST, P_SDA)
+    radio.init()
+    radio.set_vol(5)
+
+    # Inicializar Sistema
+    menu = MenuSystem(radio, oled, P_BTNS)
+    
+    print("Listo. Usa los botones.")
+    while True:
+        menu.loop()
+        time.sleep(0.05) # Pequeña pausa para no calentar la CPU
