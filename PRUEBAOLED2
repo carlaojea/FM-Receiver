@@ -1,0 +1,20 @@
+from machine import Pin, I2C
+import sh1106
+import time
+
+i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
+
+print("Scanning I2C...")
+devs = i2c.scan()
+print("Devices:", devs)
+
+if 60 not in devs:
+    print("⚠️ OLED NOT DETECTED (address 0x3C missing)")
+else:
+    print("OLED detected at 0x3C!")
+
+    oled = sh1106.SH1106_I2C(128, 64, i2c)
+    oled.fill(0)
+    oled.text("FM RADIO", 10, 20)
+    oled.text("Screen OK", 10, 40)
+    oled.show()
