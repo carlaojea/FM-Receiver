@@ -1,14 +1,14 @@
 # -------------------------------------------------------------
 #   RADIO FM SI4703 + PANTALLA SH1106 + 5 BOTONES
-#   Requiere: Archivo 'sh1106.py' en el ESP32
+#   Configuración I2C: Canal 1 (Probado y funcionando)
 # -------------------------------------------------------------
 
 from machine import Pin, I2C
 import time
-import sh1106  # Importamos tu librería
+import sh1106  # Requiere que tengas el archivo sh1106.py subido
 
 # =============================================================
-#  1. DRIVER RADIO SI4703 (Motor de sintonización)
+#  1. DRIVER RADIO SI4703
 # =============================================================
 class SI4703_Driver:
     I2C_ADDR = 0x10
@@ -24,9 +24,11 @@ class SI4703_Driver:
         self.sdio.value(0); time.sleep_ms(10)
         self.rst.value(0); time.sleep_ms(10)
         self.rst.value(1); time.sleep_ms(10)
+        
         # Encender Oscilador
         self._read(); self.shadow[0x07] = 0x8100; self._write()
         time.sleep_ms(500) 
+        
         # Encender Audio
         self._read(); self.shadow[0x02] = 0x4001; self.shadow[0x05] |= 1; self._write()
         time.sleep_ms(110)
@@ -95,14 +97,14 @@ class MenuSystem:
         self.radio = radio
         self.oled = display
         
-        # Botones con Pull-Up
+        # Botones con Pull-Up (Activo = 0)
         self.btn_up     = Pin(pins[0], Pin.IN, Pin.PULL_UP)
         self.btn_down   = Pin(pins[1], Pin.IN, Pin.PULL_UP)
         self.btn_left   = Pin(pins[2], Pin.IN, Pin.PULL_UP)
         self.btn_right  = Pin(pins[3], Pin.IN, Pin.PULL_UP)
         self.btn_center = Pin(pins[4], Pin.IN, Pin.PULL_UP)
         
-        self.cursor = 0 # 0=Freq, 1=Vol
+        self.cursor = 0 # 0=Frecuencia, 1=Volumen
         self.update_ui()
 
     def check_buttons(self):
@@ -138,7 +140,7 @@ class MenuSystem:
         freq, vol, rssi = self.radio.get_info()
         self.oled.fill(0)
         
-        # Dibujar Interfaz
+        # Interfaz Gráfica
         self.oled.text("RADIO FM", 35, 0)
         self.oled.hline(0, 10, 128, 1) # Línea horizontal
         
@@ -169,12 +171,12 @@ if __name__ == "__main__":
     # BOTONES: Arriba, Abajo, Izq, Der, Centro
     PINS_BOTONES = [13, 12, 14, 27, 26] 
 
-    # 1. Iniciar I2C (CANAL 1 - EL QUE TE FUNCIONA)
+    # 1. INICIAR I2C - CANAL 1 (EL QUE TE FUNCIONA)
     print("Iniciando I2C Canal 1...")
     i2c = I2C(1, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
 
-    # 2. Iniciar PANTALLA
-    oled = None
+    # 2. INICIAR PANTALLA
+    # Como tienes la librería sh1106.py, esto debe funcionar a la primera
     try:
         print("Iniciando Pantalla SH1106...")
         oled = sh1106.SH1106_I2C(128, 64, i2c)
@@ -184,22 +186,22 @@ if __name__ == "__main__":
     except Exception as e:
         print("\n!!! ERROR PANTALLA !!!")
         print(f"Detalle: {e}")
-        print("Revisa cables SDA/SCK o el archivo sh1106.py")
+        print("Asegúrate de que 'sh1106.py' está guardado en el ESP32.")
         raise SystemExit
 
-    # 3. Iniciar RADIO
+    # 3. INICIAR RADIO
     print("Iniciando Radio...")
     radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
     radio.init()
     
     # --- CONFIGURACIÓN INICIAL ---
     radio.set_vol(5)
-    radio.tune(101.5)  # <--- TU EMISORA INICIAL AQUÍ
+    radio.tune(101.5)  # <--- TU EMISORA FAVORITA
     # -----------------------------
 
-    # 4. Arrancar MENÚ
+    # 4. ARRANCAR MENÚ
     menu = MenuSystem(radio, oled, PINS_BOTONES)
-    print("Sistema Listo.")
+    print("Sistema Listo. Pulsa botones.")
     
     while True:
         menu.check_buttons()
