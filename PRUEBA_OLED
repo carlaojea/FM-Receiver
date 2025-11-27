@@ -1,0 +1,77 @@
+from machine import Pin, I2C
+import framebuf
+import time
+
+# ----- Clase mínima para OLED 128x64 con controlador tipo SH1106 -----
+class OLED_SH1106(framebuf.FrameBuffer):
+    def __init__(self, width, height, i2c, addr=0x3C):
+        self.width = width
+        self.height = height
+        self.i2c = i2c
+        self.addr = addr
+
+        # 1 bit por pixel -> width * height / 8 bytes
+        self.buffer = bytearray(self.width * self.height // 8)
+        super().__init__(self.buffer, self.width, self.height, framebuf.MONO_VLSB)
+
+        self._init_display()
+
+    def _write_cmd(self, cmd):
+        # 0x80 = control byte para comando
+        self.i2c.writeto(self.addr, b'\x80' + bytes([cmd]))
+
+    def _write_data(self, buf):
+        # 0x40 = control byte para datos
+        self.i2c.writeto(self.addr, b'\x40' + buf)
+
+    def _init_display(self):
+        for cmd in (
+            0xAE,       # display off
+            0xD5, 0x80, # clock
+            0xA8, 0x3F, # multiplex 1/64
+            0xD3, 0x00, # display offset
+            0x40,       # start line = 0
+            0xAD, 0x8B, # charge pump (algunos SH1106 lo aceptan)
+            0xA1,       # segment remap
+            0xC8,       # COM scan dir remap
+            0xDA, 0x12, # COM pins
+            0x81, 0x80, # contraste
+            0xD9, 0x1F, # pre-charge
+            0xDB, 0x40, # Vcomh
+            0xA4,       # display follow RAM
+            0xA6,       # normal (no invertido)
+            0xAF        # display on
+        ):
+            self._write_cmd(cmd)
+
+    def show(self):
+        # SH1106 usa páginas (8 páginas de 8 px de alto)
+        for page in range(0, self.height // 8):
+            # set page address
+            self._write_cmd(0xB0 | page)
+            # set column address (0..127)
+            self._write_cmd(0x02)      # low col
+            self._write_cmd(0x10)      # high col
+            start = self.width * page
+            end = start + self.width
+            self._write_data(self.buffer[start:end])
+
+# ----- CONFIGURA I2C Y PANTALLA -----
+# Ajusta los pines SCL/SDA según tu placa
+i2c = I2C(1, scl=Pin(22), sda=Pin(21), freq=100000)
+
+print("Escaneo I2C:", i2c.scan())  # aquí deberías ver [60] normalmente
+
+oled = OLED_SH1106(128, 64, i2c, addr=0x3C)
+
+# ----- PRUEBA DE TEXTO -----
+oled.fill(0)
+oled.text("FM RADIO", 0, 0)
+oled.text("Pantalla OK", 0, 16)
+oled.text("GME12864-77", 0, 32)
+oled.text(":)", 0, 48)
+oled.show()
+
+# Opcional: dibuja algo en bucle
+while True:
+    time.sleep(1)
