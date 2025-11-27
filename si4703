@@ -109,4 +109,98 @@ class MenuSystem:
         act = False
         # Navegación Vertical
         if self.btn_up.value() == 0:
-            self.cursor = 0; act = True; time.sleep(0.2
+            self.cursor = 0; act = True; time.sleep(0.2)
+        elif self.btn_down.value() == 0:
+            self.cursor = 1; act = True; time.sleep(0.2)
+
+        # Acciones Horizontales
+        if self.cursor == 0: # FRECUENCIA
+            if self.btn_left.value() == 0:
+                self.radio.tune_step(False); act = True
+            elif self.btn_right.value() == 0:
+                self.radio.tune_step(True); act = True
+            elif self.btn_center.value() == 0:
+                self.oled.fill(0); self.oled.text("Buscando...", 25, 30); self.oled.show()
+                self.radio.seek(True); act = True
+
+        elif self.cursor == 1: # VOLUMEN
+            vol = self.radio.get_info()[1]
+            if self.btn_left.value() == 0:
+                self.radio.set_vol(vol - 1); act = True; time.sleep(0.1)
+            elif self.btn_right.value() == 0:
+                self.radio.set_vol(vol + 1); act = True; time.sleep(0.1)
+            elif self.btn_center.value() == 0:
+                self.radio.set_vol(0); act = True; time.sleep(0.3)
+        
+        if act: self.update_ui()
+
+    def update_ui(self):
+        freq, vol, rssi = self.radio.get_info()
+        self.oled.fill(0)
+        
+        # Dibujar Interfaz
+        self.oled.text("RADIO FM", 35, 0)
+        self.oled.hline(0, 10, 128, 1) # Línea horizontal
+        
+        y = 20 if self.cursor == 0 else 40
+        self.oled.text(">", 5, y)
+        self.oled.text(f"Freq: {freq:.1f}", 20, 20)
+        self.oled.text(f"Vol : {vol}", 20, 40)
+        
+        # Barras visuales
+        self.oled.rect(90, 20, 30, 8, 1)
+        self.oled.fill_rect(92, 22, int((rssi/100)*26), 4, 1)
+        
+        self.oled.rect(90, 40, 30, 8, 1)
+        self.oled.fill_rect(92, 42, int((vol/15)*26), 4, 1)
+        
+        self.oled.hline(0, 52, 128, 1)
+        if self.cursor==0: self.oled.text("[Tune] [Seek]", 10, 55)
+        else: self.oled.text("[-Vol+] [Mute]", 10, 55)
+        
+        self.oled.show()
+
+# =============================================================
+#  3. CONFIGURACIÓN Y BUCLE PRINCIPAL
+# =============================================================
+if __name__ == "__main__":
+    # PINES
+    PIN_SDA = 21; PIN_SCL = 22; PIN_RST = 4
+    # BOTONES: Arriba, Abajo, Izq, Der, Centro
+    PINS_BOTONES = [13, 12, 14, 27, 26] 
+
+    # 1. Iniciar I2C (CANAL 1 - EL QUE TE FUNCIONA)
+    print("Iniciando I2C Canal 1...")
+    i2c = I2C(1, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
+
+    # 2. Iniciar PANTALLA
+    oled = None
+    try:
+        print("Iniciando Pantalla SH1106...")
+        oled = sh1106.SH1106_I2C(128, 64, i2c)
+        oled.fill(0)
+        oled.text("Iniciando...", 20, 30)
+        oled.show()
+    except Exception as e:
+        print("\n!!! ERROR PANTALLA !!!")
+        print(f"Detalle: {e}")
+        print("Revisa cables SDA/SCK o el archivo sh1106.py")
+        raise SystemExit
+
+    # 3. Iniciar RADIO
+    print("Iniciando Radio...")
+    radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
+    radio.init()
+    
+    # --- CONFIGURACIÓN INICIAL ---
+    radio.set_vol(5)
+    radio.tune(101.5)  # <--- TU EMISORA INICIAL AQUÍ
+    # -----------------------------
+
+    # 4. Arrancar MENÚ
+    menu = MenuSystem(radio, oled, PINS_BOTONES)
+    print("Sistema Listo.")
+    
+    while True:
+        menu.check_buttons()
+        time.sleep(0.05)
