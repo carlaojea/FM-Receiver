@@ -1,147 +1,106 @@
 # -------------------------------------------------------------
-#   MicroPython driver para Si4703 en modo 3-wire (SDIO/SCLK/SEN)
-#   Módulo HW-322 — ESP32
-#   Versión didáctica con RESET manual
+#   CÓDIGO 1: PRUEBA BÁSICA SI4703 (SIN PANTALLA NI BOTONES)
+#   Objetivo: Verificar que la radio sintoniza y se escucha.
 # -------------------------------------------------------------
 
-from machine import Pin
+from machine import Pin, I2C
 import time
 
+# --- CLASE DEL DRIVER SI4703 (Motor de la radio) ---
+class SI4703_Simple:
+    I2C_ADDR = 0x10
+    
+    def __init__(self, i2c, pin_reset, pin_sdio):
+        self.i2c = i2c
+        self.rst = Pin(pin_reset, Pin.OUT)
+        self.sdio = Pin(pin_sdio, Pin.OUT)
+        self.shadow = [0] * 16 # Memoria de registros
 
-class SI4703:
-    def __init__(self, pin_sdio=21, pin_sclk=22, pin_sen=23, pin_reset=4):
-        # Guardar pines
-        self.sdio_pin = pin_sdio
-
-        # SDIO = entrada al inicio (modo lectura)
-        self.sdio = Pin(pin_sdio, Pin.IN)
-        self.sclk = Pin(pin_sclk, Pin.OUT)
-        self.sen  = Pin(pin_sen, Pin.OUT)
-        self.rst  = Pin(pin_reset, Pin.OUT)
-
-        # Valores iniciales recomendados
-        self.sclk.value(0)
-        self.sen.value(1)    # SEN inactivo
-
-    # ----------------------------------------------------------
-    #  IMPULSO DIGITAL DE ENCENDIDO (RESET)
-    #  Obligatorio para entrar en modo 3-wire
-    # ----------------------------------------------------------
-    def hardware_reset(self):
-        # Según datasheet:
-        # SEN = HIGH, SCLK = LOW
-        self.sen.value(1)
-        self.sclk.value(0)
-
-        # Pulso digital
+    def start(self):
+        print("Iniciando radio...")
+        # 1. Reset Físico (Secuencia especial para modo I2C)
+        self.sdio.value(0)
+        time.sleep_ms(10)
         self.rst.value(0)
         time.sleep_ms(10)
-        self.rst.value(1)   # ← IMPULSO DIGITAL
-        time.sleep_ms(60)
+        self.rst.value(1)
+        time.sleep_ms(10)
+        
+        # 2. Encender Oscilador
+        self._read()
+        self.shadow[0x07] = 0x8100 # Test1 Register -> Enable XOSC
+        self._write()
+        time.sleep_ms(500) # ESPERA IMPORTANTE (Cargar el cristal)
+        
+        # 3. Encender Sonido
+        self._read()
+        self.shadow[0x02] = 0x4001 # PowerConfig -> Enable + DMute
+        self.shadow[0x05] |= 0x0001 # SysConfig2 -> Espaciado europeo
+        self._write()
+        time.sleep_ms(110)
+        print("¡Radio encendida!")
 
-    # ----------------------------------------------------------
-    #  Manejo de SDIO como entrada/salida
-    # ----------------------------------------------------------
-    def _sdio_out(self):
-        self.sdio.init(Pin.OUT)
+    def tune(self, freq):
+        # Sintonizar una frecuencia (ej. 101.5)
+        channel = int((freq - 87.5) / 0.1)
+        self._read()
+        self.shadow[0x03] &= 0xFE00 
+        self.shadow[0x03] |= channel
+        self.shadow[0x03] |= (1 << 15) # Bit TUNE
+        self._write()
+        
+        # Esperar a que termine
+        while True:
+            self._read()
+            if self.shadow[0x0A] & (1 << 14): break # Bit STC
+            time.sleep_ms(20)
+            
+        self.shadow[0x03] &= ~(1 << 15) # Apagar bit TUNE
+        self._write()
+        print(f"Sintonizado en: {freq} MHz")
 
-    def _sdio_in(self):
-        self.sdio.init(Pin.IN)
-
-    # ----------------------------------------------------------
-    #  Bit-banging 3-wire
-    # ----------------------------------------------------------
-    def _pulse_clk(self):
-        self.sclk.value(0)
-        time.sleep_us(2)
-        self.sclk.value(1)
-        time.sleep_us(2)
-
-    def _send_bit(self, bit):
-        self.sdio.value(bit)
-        self._pulse_clk()
-
-    def _read_bit(self):
-        self._pulse_clk()
-        return self.sdio.value()
-
-    def _send_word(self, w):
-        self._sdio_out()
-        for i in range(15, -1, -1):
-            self._send_bit((w >> i) & 1)
-
-    def _read_word(self):
-        self._sdio_in()
-        v = 0
-        for _ in range(16):
-            v = (v << 1) | self._read_bit()
-        return v
-
-    # ----------------------------------------------------------
-    #  Escritura registros 0x02 en adelante
-    # ----------------------------------------------------------
-    def write_registers(self, values):
-        self.sen.value(0)
-        time.sleep_us(2)
-
-        for w in values:
-            self._send_word(w)
-
-        self.sen.value(1)
-        time.sleep_us(2)
-
-    # ----------------------------------------------------------
-    #  Lectura registros 0x0A en adelante
-    # ----------------------------------------------------------
-    def read_registers(self, count=6):
-        regs = []
-
-        self.sen.value(0)
-        time.sleep_us(2)
-
-        for _ in range(count):
-            regs.append(self._read_word())
-
-        self.sen.value(1)
-        time.sleep_us(2)
-        return regs
-
-    # ----------------------------------------------------------
-    #  POWERUP → activar FM sin mute
-    # ----------------------------------------------------------
-    def powerup(self):
-        POWERCFG = 0x4001  # Enable + Unmute
-        self.write_registers([POWERCFG])
-        time.sleep_ms(200)
-
-    # ----------------------------------------------------------
-    #  VOLUMEN 0–15
-    # ----------------------------------------------------------
     def set_volume(self, vol):
-        assert 0 <= vol <= 15
+        # Volumen del 0 al 15
+        self._read()
+        self.shadow[0x05] = (self.shadow[0x05] & 0xFFF0) | vol
+        self._write()
+        print(f"Volumen puesto a: {vol}")
 
-        regs = self.read_registers(6)
-        VOL = regs[5]
+    # Funciones internas I2C
+    def _read(self):
+        try:
+            d = self.i2c.readfrom(self.I2C_ADDR, 32)
+            idx = 0x0A
+            for i in range(0, 32, 2):
+                self.shadow[idx] = (d[i] << 8) | d[i+1]
+                idx = (idx + 1) if idx < 0x0F else 0
+        except: print("Error de conexión I2C")
 
-        VOL = (VOL & 0xFFF0) | vol
-        self.write_registers([VOL])
+    def _write(self):
+        buf = bytearray(12)
+        idx = 0
+        for r in range(0x02, 0x08):
+            buf[idx] = (self.shadow[r] >> 8) & 0xFF
+            buf[idx+1] = self.shadow[r] & 0xFF
+            idx += 2
+        self.i2c.writeto(self.I2C_ADDR, buf)
 
-    # ----------------------------------------------------------
-    #  Sintonizar frecuencia FM en kHz (p. ej. 101100 = 101.1 MHz)
-    # ----------------------------------------------------------
-    def tune(self, freq_khz):
-        f_mhz = freq_khz / 1000
-        CHAN = int((f_mhz - 87.5) / 0.1)
-
-        TUNE = 0x8000 | CHAN
-        self.write_registers([0x4001, TUNE])
-
-        time.sleep_ms(60)
-
-    # ----------------------------------------------------------
-    #  Intensidad de señal RSSI
-    # ----------------------------------------------------------
-    def get_rssi(self):
-        regs = self.read_registers(6)
-        STATUSRSSI = regs[0]
-        return STATUSRSSI & 0x00FF
+# --- ZONA DE CONFIGURACIÓN ---
+if __name__ == "__main__":
+    # Pines
+    PIN_SDA = 21
+    PIN_SCL = 22
+    PIN_RST = 4
+    
+    # 1. Configurar conexión
+    i2c = I2C(0, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
+    radio = SI4703_Simple(i2c, PIN_RST, PIN_SDA)
+    
+    # 2. Encender
+    radio.start()
+    
+    # 3. Pruebas fijas (CAMBIA ESTOS VALORES A TU GUSTO)
+    radio.set_volume(8)      # Pone volumen 8
+    radio.tune(98.5)         # Sintoniza 98.5 MHz
+    
+    print("Si escuchas ruido o música, todo está bien.")
