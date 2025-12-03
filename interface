@@ -1,0 +1,35 @@
+# Archivo: interface.py
+
+class RadioUI:
+    def __init__(self, oled):
+        self.oled = oled
+
+    def actualizar(self, freq, vol, rssi, mensaje_estado=""):
+        self.oled.fill(0)
+        
+        # Cabecera
+        self.oled.text("RADIO FM", 35, 0)
+        self.oled.hline(0, 10, 128, 1)
+
+        if mensaje_estado != "":
+            # Si estamos buscando, mostrar mensaje
+            self.oled.text(mensaje_estado, 20, 30)
+        else:
+            # Frecuencia Grande
+            self.oled.text("FREQ:", 0, 20)
+            self.oled.text(f"{freq:.1f} MHz", 45, 20)
+
+            # Volumen
+            self.oled.text("VOL :", 0, 40)
+            self.oled.text(f"{vol}", 45, 40)
+            
+            # Barra de Volumen visual
+            self.oled.rect(65, 40, 60, 8, 1)
+            # Calculamos ancho proporcional (máx 58 píxeles)
+            ancho = int((vol/15) * 58)
+            self.oled.fill_rect(67, 42, ancho, 4, 1)
+
+            # Señal (RSSI)
+            self.oled.text(f"Sig:{rssi}", 80, 55)
+
+        self.oled.show()
