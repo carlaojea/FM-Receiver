@@ -1,29 +1,50 @@
-from si4703 import SI4703
-import time
+# Archivo: main.py
+from machine import Pin, I2C
+import sh1106
 
-# Crear objeto radio con los GPIO que usas en tu ESP32
-radio = SI4703(
-    pin_sdio=21,
-    pin_sclk=22,
-    pin_sen=23,
-    pin_reset=4
-)
+# Importamos nuestros módulos
+from si4703 import SI4703_Driver
+from interface import RadioUI
+from controller import RadioController
 
-print("---- Impulso digital para encender el Si4703 ----")
-radio.hardware_reset()       # ¡ESTO es lo que pide tu profesor!
+# Pines de configuración global
+PIN_SDA = 21
+PIN_SCL = 22
+PIN_RST = 4 
 
-print("---- Encendiendo chip (POWERUP) ----")
-radio.powerup()
+def system_start():
+    print("Starting Radio...")
+    
+    # 1. Configurar I2C
+    i2c = I2C(1, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
+    
+    # 2. Iniciar Pantalla
+    try:
+        oled = sh1106.SH1106_I2C(128, 64, i2c)
+        ui = RadioUI(oled) # Instanciamos la Vista
+        oled.fill(0); oled.text("Loading...", 30, 30); oled.show()
+    except Exception as e:
+        print(f"Error Pantalla: {e}")
+        return
 
-print("---- Ajustando volumen ----")
-radio.set_volume(10)
+    # 3. Iniciar Radio
+    try:
+        radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
+        radio.init() # Instanciamos el Modelo
+    except Exception as e:
+        print(f"Error Radio: {e}")
+        return
 
-print("---- Sintonizando emisora ----")
-radio.tune(101100)  # 101.1 MHz
+    # 4. Iniciar Controlador (Le pasamos la radio y la UI)
+    # El controlador es el jefe que maneja los botones
+    ctrl = RadioController(radio, ui)
+    
+    print("System Ready.")
 
-print("Radio funcionando (si tienes el módulo enchufado).")
-print("Mostrando RSSI cada segundo:\n")
+    # 5. Bucle Infinito
+    while True:
+        # Delegamos todo el trabajo al controlador
+        ctrl.loop()
 
-while True:
-    print("RSSI =", radio.get_rssi())
-    time.sleep(1)
+if __name__ == "__main__":
+    system_start()
