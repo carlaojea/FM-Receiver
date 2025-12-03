@@ -1,0 +1,69 @@
+# Archivo: controller.py
+from machine import Pin
+import time
+
+class RadioController:
+    def __init__(self, radio, ui):
+        self.radio = radio
+        self.ui = ui
+        
+        # --- DEFINICIÓN DE BOTONES ---
+        # Ajusta estos pines si es necesario
+        self.btn_vol_up   = Pin(13, Pin.IN, Pin.PULL_UP)
+        self.btn_vol_down = Pin(12, Pin.IN, Pin.PULL_UP)
+        self.btn_freq_up  = Pin(27, Pin.IN, Pin.PULL_UP)
+        self.btn_freq_down= Pin(14, Pin.IN, Pin.PULL_UP)
+        
+        # Estado inicial
+        self.vol_actual = 10
+        self.radio.set_vol(self.vol_actual)
+        self.radio.tune(103.9) # Emisora inicial
+
+    def loop(self):
+        """Esta función se debe llamar constantemente desde el main"""
+        accion_realizada = False
+        mensaje_estado = ""
+
+        # 1. LOGICA DE VOLUMEN
+        if self.btn_vol_up.value() == 0:
+            if self.vol_actual < 15:
+                self.vol_actual += 1
+                # AQUÍ ESTÁ EL ENLACE: Actualizamos Hardware
+                self.radio.set_vol(self.vol_actual)
+                accion_realizada = True
+                time.sleep(0.15) # Antirebote
+
+        elif self.btn_vol_down.value() == 0:
+            if self.vol_actual > 0:
+                self.vol_actual -= 1
+                self.radio.set_vol(self.vol_actual)
+                accion_realizada = True
+                time.sleep(0.15)
+
+        # 2. LOGICA DE FRECUENCIA
+        elif self.btn_freq_up.value() == 0:
+            mensaje_estado = "Searching >>"
+            # Actualizamos UI primero para que el usuario sepa que está pasando
+            self.ui.actualizar(0, 0, 0, mensaje_estado) 
+            self.radio.seek(True) # Hardware busca
+            accion_realizada = True
+            time.sleep(0.3)
+
+        elif self.btn_freq_down.value() == 0:
+            mensaje_estado = "<< Searching"
+            self.ui.actualizar(0, 0, 0, mensaje_estado)
+            self.radio.seek(False)
+            accion_realizada = True
+            time.sleep(0.3)
+
+        # 3. ACTUALIZAR PANTALLA (El enlace final)
+        # Leemos la frecuencia real del chip (por si el seek cambió algo)
+        freq, _, rssi = self.radio.get_info()
+        
+        # Si no hay mensaje de "buscando", pintamos la info normal
+        if mensaje_estado == "":
+            # Aquí pasamos 'self.vol_actual' a la pantalla para que la barra se pinte bien
+            self.ui.actualizar(freq, self.vol_actual, rssi)
+        
+        # Pequeña pausa para no saturar CPU
+        time.sleep(0.1)
