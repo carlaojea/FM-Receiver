@@ -38,7 +38,7 @@ def system_start():
     # 4. Start Controller
     ctrl = RadioController(radio, ui)
     
-    print("System Ready.")
+    print("Radio Ready.")
 
     # 5. Infinite Loop
     while True:
