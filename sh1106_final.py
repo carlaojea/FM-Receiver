@@ -1,4 +1,4 @@
-# Driver for SH1106 (1.3" OLED screens)
+# Driver for SH1106 (screen OLED 1.3")
 from machine import I2C
 import framebuf
 
@@ -37,7 +37,7 @@ class SH1106(framebuf.FrameBuffer):
     def show(self):
         for page in range(self.pages):
             self.write_cmd(0xB0 + page)
-            self.write_cmd(0x02) # Low col addr (2 px offset for SH1106)
+            self.write_cmd(0x02) # Low col addr (offset de 2 px para SH1106)
             self.write_cmd(0x10) # High col addr
             self.i2c.writeto(self.addr, b'\x40' + self.buffer[page * self.width:(page + 1) * self.width])
 
@@ -57,7 +57,8 @@ class SH1106(framebuf.FrameBuffer):
     def invert(self, invert):
         self.write_cmd(0xA6 | (invert & 1))
 
-# Helper class compatible with standard constructor
+# Clase Helper compatible con la llamada estándar
 class SH1106_I2C(SH1106):
     def __init__(self, width, height, i2c, addr=0x3c):
         super().__init__(width, height, i2c, addr)
+
