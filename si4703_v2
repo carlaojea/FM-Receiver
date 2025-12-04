@@ -1,15 +1,11 @@
-# -------------------------------------------------------------
-#   RADIO FM SI4703 + PANTALLA SH1106 + 4 BOTONES
-#   Requiere: Archivo 'sh1106.py' (Tu librería)
-# -------------------------------------------------------------
 
 from machine import Pin, I2C
 import time
-import sh1106  # <--- IMPORTAMOS TU LIBRERÍA AQUÍ
+import sh1106 
 
-# =============================================================
-#  1. DRIVER RADIO SI4703 (Motor de la radio)
-# =============================================================
+
+#  1. DRIVER RADIO SI4703 
+
 class SI4703_Driver:
     I2C_ADDR = 0x10
     
@@ -20,16 +16,16 @@ class SI4703_Driver:
         self.shadow = [0] * 16 
 
     def init(self):
-        # Reset Secuencia
+        # Reset 
         self.sdio.value(0); time.sleep_ms(10)
         self.rst.value(0); time.sleep_ms(10)
         self.rst.value(1); time.sleep_ms(10)
         
-        # Encender Oscilador
+        # turn on Oscillator
         self._read(); self.shadow[0x07] = 0x8100; self._write()
         time.sleep_ms(500) 
         
-        # Encender Audio
+        # turn on Audio
         self._read(); self.shadow[0x02] = 0x4001; self.shadow[0x05] |= 1; self._write()
         time.sleep_ms(110)
 
@@ -39,7 +35,7 @@ class SI4703_Driver:
         self._write()
 
     def tune(self, freq):
-        # IR A FRECUENCIA EXACTA
+        # EXACT FREQUENCY 
         channel = int((freq - 87.5) / 0.1)
         self._read()
         self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | channel | (1 << 15)
@@ -47,7 +43,6 @@ class SI4703_Driver:
         self.shadow[0x03] &= ~(1 << 15); self._write()
 
     def tune_step(self, up=True):
-        # PASO A PASO
         self._read()
         chan = self.shadow[0x03] & 0x03FF
         chan = (chan + 1) if up else (chan - 1)
@@ -56,7 +51,6 @@ class SI4703_Driver:
         self.shadow[0x03] &= ~(1 << 15); self._write()
 
     def seek(self, up=True):
-        # BUSQUEDA AUTO
         self._read()
         if up: self.shadow[0x02] |= (1 << 9)
         else: self.shadow[0x02] &= ~(1 << 9)
@@ -89,13 +83,13 @@ class SI4703_Driver:
             b[x]=(self.shadow[r]>>8)&0xFF; b[x+1]=self.shadow[r]&0xFF; x+=2
         self.i2c.writeto(self.I2C_ADDR, b)
 
-# =============================================================
-#  2. INTERFAZ GRÁFICA (DIBUJAR EN TU PANTALLA)
+
+#  2. GRAPHIC INTERFACE
 # =============================================================
 def actualizar_pantalla(oled, freq, vol, rssi, mensaje_estado=""):
     oled.fill(0)
     
-    # Cabecera
+    
     oled.text("RADIO FM", 35, 0)
     oled.hline(0, 10, 128, 1)
 
@@ -103,76 +97,71 @@ def actualizar_pantalla(oled, freq, vol, rssi, mensaje_estado=""):
         # Si estamos buscando, mostrar mensaje
         oled.text(mensaje_estado, 20, 30)
     else:
-        # Frecuencia Grande
+        # HIGH FREQUENCY
         oled.text("FREQ:", 0, 20)
         oled.text(f"{freq:.1f} MHz", 45, 20)
 
-        # Volumen
+        # Volume
         oled.text("VOL :", 0, 40)
         oled.text(f"{vol}", 45, 40)
         
-        # Barra de Volumen visual
+        # VISUAL VOLUME 
         oled.rect(65, 40, 60, 8, 1)
         ancho = int((vol/15) * 58)
         oled.fill_rect(67, 42, ancho, 4, 1)
 
-        # Señal (RSSI)
+        # SIGNAL (RSSI)
         oled.text(f"Sig:{rssi}", 80, 55)
 
     oled.show()
 
-# =============================================================
-#  3. PROGRAMA PRINCIPAL
-# =============================================================
+
+#  3. MAIN
 if __name__ == "__main__":
-    # PINES
+    # PINS
     PIN_SDA = 21; PIN_SCL = 22; PIN_RST = 4
-    # BOTONES: Arriba, Abajo, Izq, Der, Centro
     PINS_BOTONES = [13, 12, 14, 27, 26]
        
-    # Botones (PULL_UP: Pulsado es 0)
+    # Buttons (PULL_UP: Pulsado es 0)
     btn_vol_up    = Pin(13, Pin.IN, Pin.PULL_UP)
     btn_vol_down  = Pin(12, Pin.IN, Pin.PULL_UP)
-    btn_freq_up   = Pin(27, Pin.IN, Pin.PULL_UP) # Busca siguiente
-    btn_freq_down = Pin(14, Pin.IN, Pin.PULL_UP) # Busca anterior
+    btn_freq_up   = Pin(27, Pin.IN, Pin.PULL_UP) # Looking for the next 
+    btn_freq_down = Pin(14, Pin.IN, Pin.PULL_UP) # Looking for the previous
 
 
-    # 1. INICIAR I2C - CANAL 1 (EL QUE TE FUNCIONA)
-    print("Iniciando I2C Canal 1...")
+    # 1. INICIALIZE I2C 
+    print("Starting I2C...")
     i2c = I2C(1, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
 
-    # 2. INICIAR PANTALLA
-    # Como tienes la librería sh1106.py, esto debe funcionar a la primera
+    # 2. INICIALIZE SCREEN
     try:
         print("Iniciando Pantalla SH1106...")
         oled = sh1106.SH1106_I2C(128, 64, i2c)
         oled.fill(0)
-        oled.text("Iniciando...", 20, 30)
+        oled.text("INICIATING...", 20, 30)
         oled.show()
     except Exception as e:
         print("\n!!! ERROR PANTALLA !!!")
         print(f"Detalle: {e}")
-        print("Asegúrate de que 'sh1106.py' está guardado en el ESP32.")
         raise SystemExit
 
-    # 3. INICIAR RADIO
-    print("Iniciando Radio...")
+    # 3. START RADIO
+    print("INICIATING Radio...")
     radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
     radio.init()
     
-    # Configuración inicial
+    # INICIAL CONFIGURATION
     vol_actual = 15
     radio.set_vol(vol_actual)
-    radio.tune(103.9) # Frecuencia de arranque
+    radio.tune(103.9) 
     
-    print("Sistema Listo. Botones activos.")
 
-    # 4. Bucle Infinito
+    # 4. INFINITE LOOP
     while True:
         accion = False
         estado = ""
         
-        # --- VOLUMEN ---
+        # --- VOLUME ---
         if btn_vol_up.value() == 0:
             if vol_actual < 15:
                 vol_actual += 1
@@ -187,23 +176,24 @@ if __name__ == "__main__":
                 accion = True
                 time.sleep(0.15)
 
-        # --- FRECUENCIA (BUSCAR) ---
+        # --- FREQUENCY SEEKING ---
         elif btn_freq_up.value() == 0:
-            if oled: actualizar_pantalla(oled, 0, 0, 0, "Buscando >>")
+            if oled: actualizar_pantalla(oled, 0, 0, 0, "LOOKING >>")
             radio.seek(True) # Buscar Arriba
             accion = True
             time.sleep(0.3) 
 
         elif btn_freq_down.value() == 0:
-            if oled: actualizar_pantalla(oled, 0, 0, 0, "<< Buscando")
+            if oled: actualizar_pantalla(oled, 0, 0, 0, "<< LOOKING")
             radio.seek(False) # Buscar Abajo
             accion = True
             time.sleep(0.3)
 
-        # Refrescar pantalla
-        if accion or True: # Refrescar siempre para ver la señal RSSI en tiempo real
+        # REFRESH THE SCREEN
+        if accion or True: 
             f, v, r = radio.get_info()
             vol_actual = v # Sincronizar
             if oled: actualizar_pantalla(oled, f, v, r)
         
         time.sleep(0.1)
+
