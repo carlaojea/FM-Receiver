@@ -1,4 +1,4 @@
-# Archivo: si4703.py
+# File: si4703.py
 from machine import Pin
 import time
 
@@ -10,7 +10,7 @@ class SI4703_Driver:
         self.rst = Pin(pin_rst, Pin.OUT)
         self.sdio = Pin(pin_sdio, Pin.OUT)
         self.shadow = [0] * 16
-        # RDS buffer
+        # RDS text Buffer
         self.rds_buffer = [" "] * 8 
 
     def init(self):
@@ -21,7 +21,7 @@ class SI4703_Driver:
         self._read(); self.shadow[0x07] = 0x8100; self._write()
         time.sleep_ms(500) 
         
-        # SYSCONFIG1 bit 12 for RDS
+        # SYSCONFIG RDS (Bit 12 = RDS)
         self._read(); self.shadow[0x04] |= (1 << 12); self._write()
         
         self._read(); self.shadow[0x02] = 0x4001; self.shadow[0x05] |= 1; self._write()
@@ -38,7 +38,7 @@ class SI4703_Driver:
         self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | channel | (1 << 15)
         self._write(); self._wait_stc()
         self.shadow[0x03] &= ~(1 << 15); self._write()
-        # Clean buffer
+        # Clean RDS Buffer when tuning
         self.rds_buffer = [" "] * 8 
 
     def tune_step(self, up=True):
@@ -63,22 +63,23 @@ class SI4703_Driver:
         chan = self.shadow[0x0B] & 0x03FF
         return 87.5 + (chan * 0.1), self.shadow[0x05] & 0x0F, self.shadow[0x0A] & 0xFF
 
-    #  RDS method
+    # RDS method
     def check_rds(self):
-        “””Reads RDS registers and tries to reconstruct the data”””
+        """Lee registros RDS e intenta construir el nombre"""
         self._read()
         # Check bit RDSR (RDS Ready) in register 0x0A (STATUSRSSI)
         if self.shadow[0x0A] & 0x8000:
-            # Reads adresses 0x0C, 0x0D, 0x0E, 0x0F
-            # Search for text 0x0F (Bloque D)
-            # This is a very basic decoding algorithm
+            # Read RDS register data 0x0C, 0x0D, 0x0E, 0x0F
+            # Search text in register 0x0F (Bloque D)
+            
+            # basic decoder
             bloque_b = self.shadow[0x0D]
             bloque_d = self.shadow[0x0F]
             
-            
+            # last 2 bits for index
             idx = (bloque_b & 0x0003) * 2
             
-            # Keep characters
+            # 2 characters from block D
             c1 = (bloque_d >> 8) & 0xFF
             c2 = bloque_d & 0xFF
             
