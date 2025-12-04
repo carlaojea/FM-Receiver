@@ -1,1 +1,26 @@
+DATASHEET SI4703:
 
+https://www.sparkfun.com/sparkfun-fm-tuner-basic-breakout-si4703.html
+
+https://cdn.sparkfun.com/datasheets/Wireless/General/Si470x-breakout-v13_fix_2.pdf
+
+https://www.instructables.com/FM-Radio-With-Si4703-Breakout-Board-LCD-and-Arduin/
+
+
+DATASHEET OLED:
+
+https://www.az-delivery.de/en/products/1-3zoll-i2c-oled-display
+
+
+GITHUB: 
+
+https://github.com/tomas-fryza/esp-micropython/tree/main/examples/41-fm-turner-si4703
+
+https://github.com/mathertel/Radio
+
+https://github.com/pnomblot/Arduino-FM-Radio-OLED
+
+
+WOKWI:
+
+https://wokwi.com/projects/449412948296065025
