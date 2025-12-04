@@ -1,15 +1,15 @@
 # -------------------------------------------------------------
-#   RADIO FM SI4703 + PANTALLA SH1106 + 5 BOTONES
+#   RADIO FM SI4703 + SCREEN SH1106 + 5 BUTTONS
 #   Configuración I2C: Canal 1 (Probado y funcionando)
 # -------------------------------------------------------------
 
 from machine import Pin, I2C
 import time
-import sh1106  # Requiere que tengas el archivo sh1106.py subido
+import sh1106  
 
-# =============================================================
+
 #  1. DRIVER RADIO SI4703
-# =============================================================
+
 class SI4703_Driver:
     I2C_ADDR = 0x10
     
@@ -25,11 +25,11 @@ class SI4703_Driver:
         self.rst.value(0); time.sleep_ms(10)
         self.rst.value(1); time.sleep_ms(10)
         
-        # Encender Oscilador
+        # TURN ON THE OSCILLATOR
         self._read(); self.shadow[0x07] = 0x8100; self._write()
         time.sleep_ms(500) 
         
-        # Encender Audio
+        # TURN ON THE AUDIO
         self._read(); self.shadow[0x02] = 0x4001; self.shadow[0x05] |= 1; self._write()
         time.sleep_ms(110)
 
@@ -39,7 +39,7 @@ class SI4703_Driver:
         self._write()
 
     def tune(self, freq):
-        # IR A FRECUENCIA EXACTA
+        # START WITH A SPECIFIC FREQUENCY
         channel = int((freq - 87.5) / 0.1)
         self._read()
         self.shadow[0x03] = (self.shadow[0x03] & 0xFE00) | channel | (1 << 15)
@@ -47,7 +47,6 @@ class SI4703_Driver:
         self.shadow[0x03] &= ~(1 << 15); self._write()
 
     def tune_step(self, up=True):
-        # PASO A PASO
         self._read()
         chan = self.shadow[0x03] & 0x03FF
         chan = (chan + 1) if up else (chan - 1)
@@ -56,7 +55,7 @@ class SI4703_Driver:
         self.shadow[0x03] &= ~(1 << 15); self._write()
 
     def seek(self, up=True):
-        # BUSQUEDA AUTO
+        # SEARCHING FOR FREQUENCY AUTO
         self._read()
         if up: self.shadow[0x02] |= (1 << 9)
         else: self.shadow[0x02] &= ~(1 << 9)
@@ -90,14 +89,14 @@ class SI4703_Driver:
         self.i2c.writeto(self.I2C_ADDR, b)
 
 # =============================================================
-#  2. SISTEMA DE MENÚ (Interfaz Gráfica)
+#  2. MENU SYSTEM GRAPHIC INTERFACE
 # =============================================================
 class MenuSystem:
     def __init__(self, radio, display, pins):
         self.radio = radio
         self.oled = display
         
-        # Botones con Pull-Up (Activo = 0)
+        # Buttons with Pull-Up (ON = 0)
         self.btn_up     = Pin(pins[0], Pin.IN, Pin.PULL_UP)
         self.btn_down   = Pin(pins[1], Pin.IN, Pin.PULL_UP)
         self.btn_left   = Pin(pins[2], Pin.IN, Pin.PULL_UP)
@@ -109,14 +108,14 @@ class MenuSystem:
 
     def check_buttons(self):
         act = False
-        # Navegación Vertical
+        # Vertical actions
         if self.btn_up.value() == 0:
             self.cursor = 0; act = True; time.sleep(0.2)
         elif self.btn_down.value() == 0:
             self.cursor = 1; act = True; time.sleep(0.2)
 
-        # Acciones Horizontales
-        if self.cursor == 0: # FRECUENCIA
+        # Horizontal actions
+        if self.cursor == 0: # FREQUENCY
             if self.btn_left.value() == 0:
                 self.radio.tune_step(False); act = True
             elif self.btn_right.value() == 0:
@@ -125,7 +124,7 @@ class MenuSystem:
                 self.oled.fill(0); self.oled.text("Buscando...", 25, 30); self.oled.show()
                 self.radio.seek(True); act = True
 
-        elif self.cursor == 1: # VOLUMEN
+        elif self.cursor == 1: # Volume
             vol = self.radio.get_info()[1]
             if self.btn_left.value() == 0:
                 self.radio.set_vol(vol - 1); act = True; time.sleep(0.1)
@@ -140,7 +139,7 @@ class MenuSystem:
         freq, vol, rssi = self.radio.get_info()
         self.oled.fill(0)
         
-        # Interfaz Gráfica
+        # Interface
         self.oled.text("RADIO FM", 35, 0)
         self.oled.hline(0, 10, 128, 1) # Línea horizontal
         
@@ -149,7 +148,7 @@ class MenuSystem:
         self.oled.text(f"Freq: {freq:.1f}", 20, 20)
         self.oled.text(f"Vol : {vol}", 20, 40)
         
-        # Barras visuales
+        # Visual Rectangles
         self.oled.rect(90, 20, 30, 8, 1)
         self.oled.fill_rect(92, 22, int((rssi/100)*26), 4, 1)
         
@@ -163,45 +162,43 @@ class MenuSystem:
         self.oled.show()
 
 # =============================================================
-#  3. CONFIGURACIÓN Y BUCLE PRINCIPAL
+#  3.CONFIGURATION AND MAIN LOOP
 # =============================================================
 if __name__ == "__main__":
-    # PINES
+    # PINS
     PIN_SDA = 21; PIN_SCL = 22; PIN_RST = 4
     # BOTONES: Arriba, Abajo, Izq, Der, Centro
     PINS_BOTONES = [13, 12, 14, 27, 26] 
 
-    # 1. INICIAR I2C - CANAL 1 (EL QUE TE FUNCIONA)
+    # 1. INICIALIZE I2C 
     print("Iniciando I2C Canal 1...")
     i2c = I2C(1, scl=Pin(PIN_SCL), sda=Pin(PIN_SDA), freq=100000)
 
-    # 2. INICIAR PANTALLA
-    # Como tienes la librería sh1106.py, esto debe funcionar a la primera
+    # 2. SCREEN ACTIVATION
     try:
-        print("Iniciando Pantalla SH1106...")
+        print("INICIALIZE...")
         oled = sh1106.SH1106_I2C(128, 64, i2c)
         oled.fill(0)
         oled.text("Iniciando...", 20, 30)
         oled.show()
     except Exception as e:
-        print("\n!!! ERROR PANTALLA !!!")
+        print("\n!!!SCREEN ERROR  !!!")
         print(f"Detalle: {e}")
-        print("Asegúrate de que 'sh1106.py' está guardado en el ESP32.")
         raise SystemExit
 
-    # 3. INICIAR RADIO
-    print("Iniciando Radio...")
+    # 3. INICIALIZE RADIO
+    print("LOADING RADIO...")
     radio = SI4703_Driver(i2c, PIN_RST, PIN_SDA)
     radio.init()
     
-    # --- CONFIGURACIÓN INICIAL ---
+    # ---  ---
     radio.set_vol(5)
-    radio.tune(101.5)  # <--- TU EMISORA FAVORITA
+    radio.tune(101.5) 
     # -----------------------------
 
-    # 4. ARRANCAR MENÚ
+    # 4. START THE MENU
     menu = MenuSystem(radio, oled, PINS_BOTONES)
-    print("Sistema Listo. Pulsa botones.")
+    print("SYSTEM READY. PUSH BUTTONS.")
     
     while True:
         menu.check_buttons()
