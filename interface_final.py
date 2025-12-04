@@ -33,3 +33,18 @@ class RadioUI:
             self.oled.text(f"Sig:{rssi}", 80, 55)
 
         self.oled.show()
+    def mostrar_rds(self, texto_rds):
+        self.oled.fill(0)
+        
+        # Header
+        self.oled.text("INFO RDS:", 0, 0)
+        self.oled.hline(0, 10, 128, 1)
+        
+        # Text RDS 
+        # character text
+        self.oled.text(texto_rds, 10, 30)
+        
+        # Visual indicator to check it is in RDS mode
+        self.oled.rect(0, 25, 128, 20, 1)
+        
+        self.oled.show()
